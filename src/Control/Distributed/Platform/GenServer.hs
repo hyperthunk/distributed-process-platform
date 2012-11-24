@@ -130,14 +130,12 @@ data ManageServer = TerminateServer TerminateReason
   deriving (Show, Typeable)
 $(derive makeBinary ''ManageServer)
 
--- | Matches messages using a dispatcher
-class MessageMatcher d where
-    matchMessage :: d -> Match ()
+
 
 -- | Dispatcher that knows how to dispatch messages to a handler
 -- s The server state
-data MessageDispatcher s
-  = forall a . (Serializable a) => MessageDispatcher {
+data MessageDispatcher s =
+    forall a . (Serializable a) => MessageDispatcher {
         dispatcher :: s -> Message a -> Process (s, Maybe TerminateReason)
       }
   | forall a . (Serializable a) => MessageDispatcherIf {

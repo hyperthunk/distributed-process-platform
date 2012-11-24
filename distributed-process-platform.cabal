@@ -1,36 +1,47 @@
-name: distributed-process-platform
-version:            0.1.0
-cabal-version:      >=1.8
-build-type:         Simple
-license:            BSD3
-license-file:       LICENSE
-stability:          experimental
-homepage:           http://github.com/hyperthunk/distributed-process-platform
-synopsis:           TODO
-description:        TODO
-category:           Control
-tested-with:        GHC ==7.4.1
-data-dir:           ""
+name:           distributed-process-platform
+version:        0.1.0
+cabal-version:  >=1.8
+build-type:     Simple
+license:        BSD3
+license-file:   LICENSE
+stability:      experimental
+homepage:       http://github.com/hyperthunk/distributed-process-platform
+synopsis:       TODO
+description:    TODO
+category:       Control
+tested-with:    GHC ==7.4.1
+data-dir:       ""
 
-source-repository   head
-    type:           git
-    location:       https://github.com/hyperthunk/distributed-process-platform
+source-repository head
+  type:      git
+  location:  https://github.com/hyperthunk/distributed-process-platform
 
-executable platform
-    main-is:        Main.hs
-    build-depends:  base >=4.4 && <5, binary >=0.5 && <0.6
-                    , mtl
---                    , stm
-                    , derive
-                    , distributed-static
-                    ,  distributed-process
-                    , distributed-process-simplelocalnet
-                    , network-transport
-                    , network-transport-tcp
-    buildable:      True
-    extensions:     UndecidableInstances ExistentialQuantification
-                    ScopedTypeVariables FlexibleInstances CPP BangPatterns
-                    GeneralizedNewtypeDeriving GADTs DeriveDataTypeable
-    hs-source-dirs: src
-    ghc-options:    -Wall -threaded -rtsopts
+library 
+  build-depends:    
+                   base >= 4,
+                   distributed-process,
+                   derive,
+                   distributed-static,
+                   binary,
+                   mtl
+  hs-source-dirs:   src
+  ghc-options:      -Wall
+  exposed-modules:  Control.Distributed.Platform.GenProcess,
+                   Control.Distributed.Platform.GenServer
+
+test-suite TestGen
+  type:            exitcode-stdio-1.0
+  x-uses-tf:       true
+  build-depends:   
+                   base >= 4,
+                   HUnit >= 1.2 && < 2,
+                   QuickCheck >= 2.4,
+                   test-framework >= 0.4.1,
+                   test-framework-quickcheck2,
+                   test-framework-hunit
+  hs-source-dirs:  
+                   src, 
+                   tests
+  ghc-options:     -Wall -rtsopts
+  main-is:         TestGenProcess.hs
 
