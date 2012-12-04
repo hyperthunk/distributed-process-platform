@@ -23,7 +23,10 @@ import           Data.DeriveTH
 import           Data.Typeable                            (Typeable)
 import           Prelude                                  hiding (init)
 
-type Name = String
+type ServerName = String
+type ServerPid  = BaseProcess.ProcessId
+
+data ServerId = ServerProcess ServerPid | NamedServer ServerName
 
 data Recipient a = SendToPid BaseProcess.ProcessId |
                    SendToPort (BaseProcess.SendPort a)
@@ -159,6 +162,13 @@ start ::
 start state handlers spawn = spawn $ do
   _ <- ST.runStateT (runProc handlers) state
   return ()
+
+send :: (Serializable m) => ServerId -> m -> BaseProcess.Process ()
+send s m = do
+    let msg = (Message None m)
+    case s of
+        ServerProcess pid  -> BaseProcess.send  pid  msg 
+        NamedServer   name -> BaseProcess.nsend name msg
 
 -- process request handling
 
