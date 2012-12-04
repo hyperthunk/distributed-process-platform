@@ -213,18 +213,15 @@ init s = do
 
 loop :: Behaviour s -> Timeout -> Process s TerminateReason
 loop s t = do
-    next <- processReceive (dispatchers s) t
-    case next of
-        Right r  -> return r
-        Left  s' -> nextAction s s' 
+    s' <- processReceive (dispatchers s) t
+    nextAction s s' 
     where nextAction :: Behaviour s -> ProcessAction ->
                             Process s TerminateReason
           nextAction b ProcessContinue     = loop b t
           nextAction b (ProcessTimeout t') = loop b t'
           nextAction _ (ProcessStop r)     = return (TerminateReason r) 
 
-processReceive :: [Dispatcher s] -> Timeout ->
-                  Process s (Either ProcessAction TerminateReason)
+processReceive :: [Dispatcher s] -> Timeout -> Process s ProcessAction
 processReceive ds timeout = do
     s <- getState
     let ms = map (matchMessage s) ds
@@ -233,15 +230,15 @@ processReceive ds timeout = do
         Infinity -> do
             (s', r) <- ST.lift $ BaseProcess.receiveWait ms
             putState s'
-            return (Left r)
+            return r
         Timeout t -> do
             result <- ST.lift $ BaseProcess.receiveTimeout (intervalToMillis t) ms
             case result of
                 Just (s', r) -> do
                   putState s'
-                  return (Left r)
+                  return r
                 Nothing -> do
-                  return $ Right (TerminateReason "Receive timed out")
+                  return $ ProcessStop "timed out"
 
 terminate :: Behaviour s -> TerminateReason -> Process s ()
 terminate s reason = do
