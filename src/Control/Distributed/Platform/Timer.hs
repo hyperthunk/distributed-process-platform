@@ -12,6 +12,7 @@ module Control.Distributed.Platform.Timer (
   , ticker
   , periodically
   , cancelTimer
+  , flushTimer
   , intervalToMs
   , timeToMs
   ) where
@@ -79,6 +80,17 @@ periodically t p = spawnLocal $ runTimer t p restartTimer
 -- a timer's messages are prevented from being delivered to the target process.
 cancelTimer :: TimerRef -> Process ()
 cancelTimer = (flip send) Cancellation
+
+-- | cancels a running timer and flushes any viable timer messages from the
+-- process' message queue. This function should only be called by the process
+-- expecting to receive the timer's messages!
+flushTimer :: (Serializable a, Eq a) => TimerRef -> a -> Process () 
+flushTimer ref ignore = do
+    cancelTimer ref
+    _ <- receiveTimeout 1 [
+                matchIf (\x -> x == ignore)
+                        (\_ -> return ()) ]
+    return ()
 
 -- | sets up a timer that sends `Tick' repeatedly at intervals of `t'
 ticker :: TimeInterval -> ProcessId -> Process TimerRef
