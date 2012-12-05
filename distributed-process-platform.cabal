@@ -23,11 +23,13 @@ library
                    derive,
                    distributed-static,
                    binary,
-                   mtl
+                   mtl,
+                   transformers
   hs-source-dirs:   src
   ghc-options:      -Wall
   exposed-modules:  Control.Distributed.Platform.GenProcess,
                    Control.Distributed.Platform.GenServer
+  other-modules:   Control.Distributed.Platform.Timer
 
 test-suite TestGen
   type:            exitcode-stdio-1.0
@@ -38,10 +40,12 @@ test-suite TestGen
                    QuickCheck >= 2.4,
                    test-framework >= 0.4.1,
                    test-framework-quickcheck2,
-                   test-framework-hunit
+                   test-framework-hunit,
+                   transformers
   hs-source-dirs:  
                    src, 
                    tests
   ghc-options:     -Wall -rtsopts
   main-is:         TestGenProcess.hs
+  other-modules:   Control.Distributed.Platform.Timer
 

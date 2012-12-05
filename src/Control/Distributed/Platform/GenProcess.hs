@@ -13,15 +13,19 @@ module Control.Distributed.Platform.GenProcess where
 
 -- TODO: define API and hide internals...
 
-import qualified Control.Distributed.Process              as BaseProcess
-import           Control.Distributed.Process.Serializable
-import qualified Control.Monad.State                      as ST (StateT, get,
-                                                                 lift, modify,
-                                                                 put, runStateT)
-import           Data.Binary
-import           Data.DeriveTH
-import           Data.Typeable                            (Typeable)
-import           Prelude                                  hiding (init)
+import qualified Control.Distributed.Process as BaseProcess
+import qualified Control.Monad.State         as ST (StateT, get,
+                                                    lift, modify,
+                                                    put, runStateT)
+
+import Control.Distributed.Process.Serializable
+import Control.Distributed.Platform.Internal.Types
+import Control.Distributed.Platform.Timer          (intervalToMs)
+import Data.Binary
+import Data.DeriveTH
+import Data.Typeable                               (Typeable)
+import Prelude                                     hiding (init)
+
 
 type ServerName = String
 type ServerPid  = BaseProcess.ProcessId
@@ -31,23 +35,7 @@ data ServerId = ServerProcess ServerPid | NamedServer ServerName
 data Recipient a = SendToPid BaseProcess.ProcessId |
                    SendToPort (BaseProcess.SendPort a)
 
--- | Defines the time unit for a Timeout value
-data TimeUnit = Hours | Minutes | Seconds | Millis
-    deriving (Typeable)
-$(derive makeBinary ''TimeUnit)
-
-data TimeInterval = Interval TimeUnit Int
-    deriving (Typeable)
-$(derive makeBinary ''TimeInterval)
-
--- | Defines a Timeout value (and unit of measure) or
---   sets it to infinity (no timeout)
-data Timeout = Timeout TimeInterval | Infinity
-    deriving (Typeable)
-$(derive makeBinary ''Timeout)
-
 -- | Initialize handler result
--- TODO: handle state
 data InitResult =
     InitOk Timeout
   | InitStop String
@@ -129,15 +117,6 @@ $(derive makeBinary ''Termination)
 -- | Start a new server and return it's id
 -- start :: Behaviour s -> Process ProcessId
 -- start handlers = spawnLocal $ runProcess handlers
-
-intervalToMillis :: TimeInterval -> Int
-intervalToMillis (Interval u v) = timeToMs u v
-
-timeToMs :: TimeUnit -> Int -> Int
-timeToMs Millis  ms   = ms
-timeToMs Seconds sec  = sec * 1000
-timeToMs Minutes mins = (mins * 60) * 1000
-timeToMs Hours   hrs  = ((hrs * 60) * 60) * 1000
 
 reply :: (Serializable m) => ReplyTo -> m -> BaseProcess.Process ()
 reply (ReplyTo pid) m = BaseProcess.send pid m
@@ -242,7 +221,7 @@ processReceive ds timeout = do
             putState s'
             return r
         Timeout t -> do
-            result <- ST.lift $ BaseProcess.receiveTimeout (intervalToMillis t) ms
+            result <- ST.lift $ BaseProcess.receiveTimeout (intervalToMs t) ms
             case result of
                 Just (s', r) -> do
                   putState s'
@@ -261,5 +240,5 @@ trace msg = ST.lift . BaseProcess.say $ msg
 
 -- data Upgrade = ???
 -- TODO: can we use 'Static (SerializableDict a)' to pass a Behaviour spec to
--- a remote pid? if so then we can do hot server-code loading quite easily...
+-- a remote pid? if so then we may hot server-code loading quite easily...
 
