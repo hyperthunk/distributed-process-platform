@@ -5,9 +5,11 @@ module Control.Distributed.Platform.Timer (
     TimerRef
   , TimeInterval(..)
   , TimeUnit(..)
+  , Tick(Tick)
   , sendAfter
   , runAfter
   , startTimer
+  , ticker
   , periodically
   , cancelTimer
   , intervalToMs
@@ -77,6 +79,10 @@ periodically t p = spawnLocal $ runTimer t p restartTimer
 -- a timer's messages are prevented from being delivered to the target process.
 cancelTimer :: TimerRef -> Process ()
 cancelTimer = (flip send) Cancellation
+
+-- | sets up a timer that sends `Tick' repeatedly at intervals of `t'
+ticker :: TimeInterval -> ProcessId -> Process TimerRef
+ticker t pid = startTimer t pid Tick
 
 --------------------------------------------------------------------------------
 -- Implementation                                                             --
