@@ -27,7 +27,7 @@ data TimeUnit = Hours | Minutes | Seconds | Millis
     deriving (Typeable)
 $(derive makeBinary ''TimeUnit)
 
-data TimeInterval = Interval TimeUnit Int
+data TimeInterval = TimeInterval TimeUnit Int
     deriving (Typeable)
 $(derive makeBinary ''TimeInterval)
 
