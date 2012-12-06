@@ -11,8 +11,14 @@ module Control.Distributed.Platform.Timer (
   , startTimer
   , ticker
   , periodically
+  , resetTimer
   , cancelTimer
   , flushTimer
+  -- time interval handling
+  , milliseconds
+  , seconds
+  , minutes
+  , hours
   , intervalToMs
   , timeToMs
   ) where
@@ -29,9 +35,9 @@ import Prelude                                     hiding (init)
 type TimerRef = ProcessId
 
 -- | cancellation message sent to timers
-data Cancellation = Cancellation
-    deriving (Typeable)
-$(derive makeBinary ''Cancellation)
+data TimerConfig = Reset | Cancel
+    deriving (Typeable, Show)
+$(derive makeBinary ''TimerConfig)
 
 data Tick = Tick
     deriving (Typeable)
@@ -41,9 +47,27 @@ $(derive makeBinary ''Tick)
 -- API                                                                        --
 --------------------------------------------------------------------------------
 
+-- time interval/unit handling
+
 -- | converts the supplied TimeInterval to milliseconds
 intervalToMs :: TimeInterval -> Int
-intervalToMs (Interval u v) = timeToMs u v
+intervalToMs (TimeInterval u v) = timeToMs u v
+
+-- | given a number, produces a `TimeInterval' of milliseconds
+milliseconds :: Int -> TimeInterval
+milliseconds = TimeInterval Millis
+
+-- | given a number, produces a `TimeInterval' of seconds
+seconds :: Int -> TimeInterval
+seconds = TimeInterval Seconds
+
+-- | given a number, produces a `TimeInterval' of minutes
+minutes :: Int -> TimeInterval
+minutes = TimeInterval Minutes
+
+-- | given a number, produces a `TimeInterval' of hours
+hours :: Int -> TimeInterval
+hours = TimeInterval Hours
 
 -- TODO: timeToMs is not exactly efficient and we need to scale it up to
 --       deal with days, months, years, etc
@@ -58,28 +82,33 @@ timeToMs Hours   hrs  = ((hrs * 60) * 60) * 1000
 -- | starts a timer which sends the supplied message to the destination process
 -- after the specified time interval.
 sendAfter :: (Serializable a) => TimeInterval -> ProcessId -> a -> Process TimerRef
-sendAfter t pid msg = spawnLocal $ runTimer t (sender pid msg) stopTimer
+sendAfter t pid msg = runAfter t (mkSender pid msg)
 
 -- | runs the supplied process action(s) after `t' has elapsed 
 runAfter :: TimeInterval -> Process () -> Process TimerRef
-runAfter t p = spawnLocal $ runTimer t p stopTimer   
+runAfter t p = spawnLocal $ runTimer t p True   
 
 -- | starts a timer that repeatedly sends the supplied message to the destination
 -- process each time the specified time interval elapses. To stop messages from
 -- being sent in future, cancelTimer can be called.
 startTimer :: (Serializable a) => TimeInterval -> ProcessId -> a -> Process TimerRef
-startTimer t pid msg = spawnLocal $ runTimer t (sender pid msg) restartTimer
-  where restartTimer = runTimer t (sender pid msg) restartTimer
+startTimer t pid msg = periodically t (mkSender pid msg)
 
 -- | runs the supplied process action(s) repeatedly at intervals of `t'
 periodically :: TimeInterval -> Process () -> Process TimerRef
-periodically t p = spawnLocal $ runTimer t p restartTimer
-  where restartTimer = runTimer t p restartTimer
+periodically t p = spawnLocal $ runTimer t p False
 
--- | cancel a running timer. Note: Cancelling a timer does not guarantee that
+-- | resets a running timer. Note: Cancelling a timer does not guarantee that
 -- a timer's messages are prevented from being delivered to the target process.
+-- Also note that resetting an ongoing timer (started using the `startTimer' or
+-- `periodically' functions) will only cause the current elapsed period to time
+-- out, after which the timer will continue running. To stop a long-running
+-- timer, you should use `cancelTimer' instead.
+resetTimer :: TimerRef -> Process ()
+resetTimer = (flip send) Reset
+
 cancelTimer :: TimerRef -> Process ()
-cancelTimer = (flip send) Cancellation
+cancelTimer = (flip send) Cancel
 
 -- | cancels a running timer and flushes any viable timer messages from the
 -- process' message queue. This function should only be called by the process
@@ -101,17 +130,15 @@ ticker t pid = startTimer t pid Tick
 --------------------------------------------------------------------------------
 
 -- runs the timer process
-runTimer :: TimeInterval -> Process () -> Process () -> Process ()
-runTimer t proc onCancel = do
+runTimer :: TimeInterval -> Process () -> Bool -> Process ()
+runTimer t proc stopOnCancel = do
     cancel <- expectTimeout (intervalToMs t)
-    case cancel of
-        Nothing           -> proc
-        Just Cancellation -> onCancel
-
--- exit the timer process normally
-stopTimer :: Process ()
-stopTimer = return ()
+    case (cancel, stopOnCancel) of
+        (Nothing,     _)     -> proc
+        (Just Cancel, _)     -> return ()
+        (Just Reset,  True)  -> return ()
+        (Just Reset,  False) -> runTimer t proc stopOnCancel
 
 -- create a 'sender' action for dispatching `msg' to `pid'
-sender :: (Serializable a) => ProcessId -> a -> Process ()
-sender pid msg = do { send pid msg }
+mkSender :: (Serializable a) => ProcessId -> a -> Process ()
+mkSender pid msg = send pid msg
