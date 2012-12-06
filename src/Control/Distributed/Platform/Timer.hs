@@ -131,13 +131,16 @@ ticker t pid = startTimer t pid Tick
 
 -- runs the timer process
 runTimer :: TimeInterval -> Process () -> Bool -> Process ()
-runTimer t proc stopOnCancel = do
+runTimer t proc cancelOnReset = do
     cancel <- expectTimeout (intervalToMs t)
-    case (cancel, stopOnCancel) of
-        (Nothing,     _)     -> proc
-        (Just Cancel, _)     -> return ()
-        (Just Reset,  True)  -> return ()
-        (Just Reset,  False) -> runTimer t proc stopOnCancel
+    say $ "cancel = " ++ (show cancel) ++ "\n"
+    case cancel of
+        Nothing     -> runProc cancelOnReset
+        Just Cancel -> return ()
+        Just Reset  -> if cancelOnReset then return ()
+                                        else runTimer t proc cancelOnReset
+  where runProc True  = proc
+        runProc False = proc >> runTimer t proc cancelOnReset
 
 -- create a 'sender' action for dispatching `msg' to `pid'
 mkSender :: (Serializable a) => ProcessId -> a -> Process ()
