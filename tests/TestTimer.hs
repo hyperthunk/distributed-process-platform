@@ -7,34 +7,22 @@ import Prelude hiding (catch)
 import Data.Binary (Binary(..))
 import Data.Typeable (Typeable)
 import Data.DeriveTH
-import Data.Foldable (forM_)
-import Control.Concurrent (forkIO, threadDelay, myThreadId, throwTo, ThreadId)
 import Control.Concurrent.MVar
   ( MVar
   , newEmptyMVar
   , putMVar
   , takeMVar
-  , readMVar
   )
-import Control.Monad (replicateM_, replicateM, forever)
-import Control.Exception (SomeException, throwIO)
-import qualified Control.Exception as Ex (catch)
-import Control.Applicative ((<$>), (<*>), pure, (<|>))
-import qualified Network.Transport as NT (Transport, closeEndPoint)
-import Network.Socket (sClose)
+-- import Control.Applicative ((<$>), (<*>), pure, (<|>))
+import qualified Network.Transport as NT ()
 import Network.Transport.TCP
   ( createTransport
   , defaultTCPParameters
   )
 import Control.Distributed.Process
-import Control.Distributed.Process.Internal.Types
-  ( NodeId(nodeAddress)
-  , LocalNode(localEndPoint)
-  , RegisterReply(..)
-  )
+import Control.Distributed.Process.Internal.Types()
 import Control.Distributed.Process.Node
-import Control.Distributed.Process.Serializable (Serializable)
-
+import Control.Distributed.Process.Serializable()
 import Control.Distributed.Platform.Timer
 
 import Test.HUnit (Assertion)
@@ -46,61 +34,63 @@ data Ping = Ping
     deriving (Typeable)
 $(derive makeBinary ''Ping)
 
-testSendAfter :: LocalNode -> Assertion
-testSendAfter localNode = do
-  received <- newEmptyMVar
-  _ <- forkProcess localNode $ do
-    let delay = seconds 1
-    pid <- getSelfPid
-    _ <- sendAfter delay pid Ping
-    hdInbox <- receiveTimeout (intervalToMs delay * 2) [
-                  match (\m@(Ping) -> return m) ]
-    case hdInbox of
-        Just Ping -> stash received True
-        Nothing   -> stash received False
+testSendAfter :: MVar Bool -> Process ()
+testSendAfter result =  do
+  let delay = seconds 1
+  pid <- getSelfPid
+  _ <- sendAfter delay pid Ping
+  hdInbox <- receiveTimeout (intervalToMs delay * 2) [
+                                 match (\m@(Ping) -> return m) ]
+  case hdInbox of
+      Just Ping -> stash result True
+      Nothing   -> stash result False
 
-  assertComplete "expected Ping within 1 second" received
+testRunAfter :: MVar Bool -> Process ()
+testRunAfter result = do
+  let delay = seconds 2  
 
-testRunAfter :: LocalNode -> Assertion
-testRunAfter localNode = do
-  result <- newEmptyMVar
-  let delay = seconds 2
-  
-  parentPid <- forkProcess localNode $ do
-    msg <- expectTimeout (intervalToMs delay * 2)
-    case msg of
-        Just Ping -> stash result True
-        Nothing   -> stash result False
-  
-  _ <- forkProcess localNode $ do
+  parentPid <- getSelfPid
+  _ <- spawnLocal $ do
     _ <- runAfter delay $ do { send parentPid Ping }
     return ()
-  
-  assertComplete "expecting run (which pings parent) within 2 seconds" result
 
-testCancelTimer :: LocalNode -> Assertion
-testCancelTimer localNode = do
-  result <- newEmptyMVar
-  let delay = seconds 2
+  msg <- expectTimeout (intervalToMs delay * 2)
+  case msg of
+      Just Ping -> stash result True
+      Nothing   -> stash result False
+  return ()
+
+testCancelTimer :: MVar Bool -> Process ()
+testCancelTimer result = do
+  let delay = milliseconds 200
   
-  _ <- forkProcess localNode $ do
+  _ <- spawnLocal $ do
       pid <- periodically delay noop
+      
+      sleep $ seconds 1
+      
       ref <- monitor pid
       cancelTimer pid
       
       ProcessMonitorNotification ref' pid' DiedNormal <- expect
-      liftIO $ putMVar result $ ref == ref' && pid == pid'
-
-  assertComplete "expected cancelTimer to exit the timer process normally" result
+      stash result $ ref == ref' && pid == pid'
+  return ()
 
 --------------------------------------------------------------------------------
 -- Plumbing                                                                   --
 --------------------------------------------------------------------------------
 
-assertComplete :: String -> MVar Bool -> IO ()
-assertComplete msg mv = do
+delayedAssertion :: (Eq a) => String -> LocalNode -> a ->
+                    (MVar a -> Process ()) -> Assertion
+delayedAssertion note localNode expected testProc = do
+  result <- newEmptyMVar
+  _ <- forkProcess localNode $ testProc result
+  assertComplete note result expected
+
+assertComplete :: (Eq a) => String -> MVar a -> a -> IO ()
+assertComplete msg mv a = do
     b <- takeMVar mv
-    assertBool msg b
+    assertBool msg (a == b)
 
 noop :: Process ()
 noop = say "tick\n"
@@ -111,9 +101,21 @@ stash mvar x = liftIO $ putMVar mvar x
 tests :: LocalNode  -> [Test]
 tests localNode = [
     testGroup "Timer Send" [
-        testCase "testSendAfter"   (testSendAfter   localNode)
-      , testCase "testRunAfter"    (testRunAfter    localNode)
-      , testCase "testCancelTimer" (testCancelTimer localNode)
+        testCase "testSendAfter"   (delayedAssertion
+                                    "expected Ping within 1 second"
+                                    localNode
+                                    True
+                                    testSendAfter)
+      , testCase "testRunAfter"    (delayedAssertion
+                                    "expecting run (which pings parent) within 2 seconds"
+                                    localNode
+                                    True
+                                    testRunAfter)
+      , testCase "testCancelTimer" (delayedAssertion
+                                    "expected cancelTimer to exit the timer process normally"
+                                    localNode
+                                    True
+                                    testCancelTimer)
       ]
   ]
 
