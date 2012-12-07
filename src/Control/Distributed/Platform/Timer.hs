@@ -41,7 +41,7 @@ data TimerConfig = Reset | Cancel
 $(derive makeBinary ''TimerConfig)
 
 data Tick = Tick
-    deriving (Typeable)
+    deriving (Typeable, Eq)
 $(derive makeBinary ''Tick)
 
 data SleepingPill = SleepingPill

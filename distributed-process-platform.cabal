@@ -50,7 +50,7 @@ test-suite TestTimer
   hs-source-dirs:  
                    src, 
                    tests
-  ghc-options:     -Wall -rtsopts
+  ghc-options:     -Wall -threaded -rtsopts -with-rtsopts=-N -fno-warn-unused-do-bind
   other-modules:   Control.Distributed.Platform.Timer
   extensions:      CPP
   main-is:         TestTimer.hs

@@ -13,7 +13,6 @@ import Control.Concurrent.MVar
   , newEmptyMVar
   , putMVar
   , takeMVar
-  , readMVar
   , withMVar
   )
 -- import Control.Applicative ((<$>), (<*>), pure, (<|>))
@@ -56,7 +55,7 @@ testRunAfter result = do
 
   parentPid <- getSelfPid
   _ <- spawnLocal $ do
-    _ <- runAfter delay $ do { send parentPid Ping }
+    _ <- runAfter delay $ send parentPid Ping
     return ()
 
   msg <- expectTimeout (intervalToMs delay * 2)
@@ -70,15 +69,15 @@ testCancelTimer result = do
   let delay = milliseconds 200
   
   _ <- spawnLocal $ do
-      pid <- periodically delay noop
+    pid <- periodically delay noop
       
-      sleep $ seconds 1
+    sleep $ seconds 1
       
-      ref <- monitor pid
-      cancelTimer pid
+    ref <- monitor pid
+    cancelTimer pid
       
-      ProcessMonitorNotification ref' pid' DiedNormal <- expect
-      stash result $ ref == ref' && pid == pid'
+    ProcessMonitorNotification ref' pid' DiedNormal <- expect
+    stash result $ ref == ref' && pid == pid'
   return ()
 
 testPeriodicSend :: TestResult Bool -> Process ()
@@ -131,8 +130,26 @@ testTimerReset result = do
   count <- liftIO $ takeMVar counter
   liftIO $ putMVar result count                                             
 
+testTimerFlush :: TestResult Bool -> Process ()
+testTimerFlush result = do
+  let delay = seconds 1
+  self <- getSelfPid
+  ref  <- ticker delay self
+  _    <- monitor ref
+  
+  -- sleep so we *should* have a message in our 'mailbox'
+  sleep delay
+  
+  -- flush it out
+  flushTimer ref Tick
+  
+  m <- expectTimeout 10
+  case m of
+      Nothing   -> stash result True
+      Just Tick -> stash result False
+
 --------------------------------------------------------------------------------
--- Plumbing                                                                   --
+-- Utilities and Plumbing                                                     --
 --------------------------------------------------------------------------------
 
 delayedAssertion :: (Eq a) => String -> LocalNode -> a ->
@@ -158,14 +175,10 @@ tests localNode = [
     testGroup "Timer Send" [
         testCase "testSendAfter"    (delayedAssertion
                                      "expected Ping within 1 second"
-                                     localNode
-                                     True
-                                     testSendAfter)
+                                     localNode True testSendAfter)
       , testCase "testRunAfter"     (delayedAssertion
                                      "expecting run (which pings parent) within 2 seconds"
-                                     localNode
-                                     True
-                                     testRunAfter)
+                                     localNode True testRunAfter)
       , testCase "testCancelTimer"  (delayedAssertion
                                      "expected cancelTimer to exit the timer process normally"
                                      localNode
@@ -173,14 +186,13 @@ tests localNode = [
                                      testCancelTimer)
       , testCase "testPeriodicSend" (delayedAssertion
                                      "expected ten Ticks to have been sent before exiting"
-                                     localNode
-                                     True
-                                     testPeriodicSend)
+                                     localNode True testPeriodicSend)
       , testCase "testTimerReset"   (delayedAssertion
                                      "expected no Ticks to have been sent before resetting"
-                                     localNode
-                                     0
-                                     testTimerReset)
+                                     localNode 0 testTimerReset)
+      , testCase "testTimerReset"   (delayedAssertion
+                                     "expected all Ticks to have been flushed"
+                                     localNode True testTimerFlush)
       ]
   ]
 
