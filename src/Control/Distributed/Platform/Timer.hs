@@ -6,6 +6,7 @@ module Control.Distributed.Platform.Timer (
   , TimeInterval(..)
   , TimeUnit(..)
   , Tick(Tick)
+  , sleep
   , sendAfter
   , runAfter
   , startTimer
@@ -43,6 +44,10 @@ data Tick = Tick
     deriving (Typeable)
 $(derive makeBinary ''Tick)
 
+data SleepingPill = SleepingPill
+    deriving (Typeable)
+$(derive makeBinary ''SleepingPill)
+
 --------------------------------------------------------------------------------
 -- API                                                                        --
 --------------------------------------------------------------------------------
@@ -78,6 +83,17 @@ timeToMs Millis  ms   = ms
 timeToMs Seconds sec  = sec * 1000
 timeToMs Minutes mins = (mins * 60) * 1000
 timeToMs Hours   hrs  = ((hrs * 60) * 60) * 1000
+
+-- | blocks the calling Process for the specified TimeInterval. Note that this
+-- function assumes that a blocking receive is the most efficient approach to
+-- acheiving this, so expect the runtime semantics (particularly with regards
+-- scheduling) to differ from threadDelay and/or operating system specific 
+-- functions that offer the same results.
+sleep :: TimeInterval -> Process ()
+sleep t = do
+  let ms = intervalToMs t
+  Nothing <- receiveTimeout ms [match (\SleepingPill -> return ())]
+  return ()
 
 -- | starts a timer which sends the supplied message to the destination process
 -- after the specified time interval.
@@ -116,6 +132,7 @@ cancelTimer = (flip send) Cancel
 flushTimer :: (Serializable a, Eq a) => TimerRef -> a -> Process () 
 flushTimer ref ignore = do
     cancelTimer ref
+    -- TODO: monitor the timer ref (pid) and ensure it's gone before finishing
     _ <- receiveTimeout 1 [
                 matchIf (\x -> x == ignore)
                         (\_ -> return ()) ]
