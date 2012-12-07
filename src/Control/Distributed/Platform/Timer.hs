@@ -161,4 +161,6 @@ runTimer t proc cancelOnReset = do
 
 -- create a 'sender' action for dispatching `msg' to `pid'
 mkSender :: (Serializable a) => ProcessId -> a -> Process ()
-mkSender pid msg = send pid msg
+mkSender pid msg = do
+  say "sending\n"
+  send pid msg
