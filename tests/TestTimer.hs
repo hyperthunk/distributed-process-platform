@@ -7,11 +7,14 @@ import Prelude hiding (catch)
 import Data.Binary (Binary(..))
 import Data.Typeable (Typeable)
 import Data.DeriveTH
+import Control.Monad (forever)
 import Control.Concurrent.MVar
   ( MVar
   , newEmptyMVar
   , putMVar
   , takeMVar
+  , readMVar
+  , withMVar
   )
 -- import Control.Applicative ((<$>), (<*>), pure, (<|>))
 import qualified Network.Transport as NT ()
@@ -30,11 +33,13 @@ import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit.Base (assertBool)
 
+type TestResult a = MVar a
+
 data Ping = Ping
     deriving (Typeable)
 $(derive makeBinary ''Ping)
 
-testSendAfter :: MVar Bool -> Process ()
+testSendAfter :: TestResult Bool -> Process ()
 testSendAfter result =  do
   let delay = seconds 1
   pid <- getSelfPid
@@ -45,7 +50,7 @@ testSendAfter result =  do
       Just Ping -> stash result True
       Nothing   -> stash result False
 
-testRunAfter :: MVar Bool -> Process ()
+testRunAfter :: TestResult Bool -> Process ()
 testRunAfter result = do
   let delay = seconds 2  
 
@@ -60,7 +65,7 @@ testRunAfter result = do
       Nothing   -> stash result False
   return ()
 
-testCancelTimer :: MVar Bool -> Process ()
+testCancelTimer :: TestResult Bool -> Process ()
 testCancelTimer result = do
   let delay = milliseconds 200
   
@@ -76,12 +81,26 @@ testCancelTimer result = do
       stash result $ ref == ref' && pid == pid'
   return ()
 
+testPeriodicSend :: TestResult Bool -> Process ()
+testPeriodicSend result = do
+    let delay = milliseconds 100
+    self <- getSelfPid
+    ref <- ticker delay self
+    listener 0 ref
+    liftIO $ putMVar result True
+  where listener :: Int -> TimerRef -> Process ()
+        listener n tRef | n > 10    = cancelTimer tRef
+                        | otherwise = waitOne >> listener (n + 1) tRef  
+        waitOne :: Process ()
+        waitOne = do
+            Tick <- expect
+            return ()
 --------------------------------------------------------------------------------
 -- Plumbing                                                                   --
 --------------------------------------------------------------------------------
 
 delayedAssertion :: (Eq a) => String -> LocalNode -> a ->
-                    (MVar a -> Process ()) -> Assertion
+                    (TestResult a -> Process ()) -> Assertion
 delayedAssertion note localNode expected testProc = do
   result <- newEmptyMVar
   _ <- forkProcess localNode $ testProc result
@@ -95,27 +114,32 @@ assertComplete msg mv a = do
 noop :: Process ()
 noop = say "tick\n"
 
-stash :: MVar a -> a -> Process ()
+stash :: TestResult a -> a -> Process ()
 stash mvar x = liftIO $ putMVar mvar x
 
 tests :: LocalNode  -> [Test]
 tests localNode = [
     testGroup "Timer Send" [
-        testCase "testSendAfter"   (delayedAssertion
-                                    "expected Ping within 1 second"
-                                    localNode
-                                    True
-                                    testSendAfter)
-      , testCase "testRunAfter"    (delayedAssertion
-                                    "expecting run (which pings parent) within 2 seconds"
-                                    localNode
-                                    True
-                                    testRunAfter)
-      , testCase "testCancelTimer" (delayedAssertion
-                                    "expected cancelTimer to exit the timer process normally"
-                                    localNode
-                                    True
-                                    testCancelTimer)
+        testCase "testSendAfter"    (delayedAssertion
+                                     "expected Ping within 1 second"
+                                     localNode
+                                     True
+                                     testSendAfter)
+      , testCase "testRunAfter"     (delayedAssertion
+                                     "expecting run (which pings parent) within 2 seconds"
+                                     localNode
+                                     True
+                                     testRunAfter)
+      , testCase "testCancelTimer"  (delayedAssertion
+                                     "expected cancelTimer to exit the timer process normally"
+                                     localNode
+                                     True
+                                     testCancelTimer)
+      , testCase "testPeriodicSend" (delayedAssertion
+                                     "expected ten Ticks to have been sent before exiting"
+                                     localNode
+                                     True
+                                     testPeriodicSend)
       ]
   ]
 
