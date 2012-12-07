@@ -83,18 +83,54 @@ testCancelTimer result = do
 
 testPeriodicSend :: TestResult Bool -> Process ()
 testPeriodicSend result = do
-    let delay = milliseconds 100
-    self <- getSelfPid
-    ref <- ticker delay self
-    listener 0 ref
-    liftIO $ putMVar result True
+  let delay = milliseconds 100
+  self <- getSelfPid
+  ref <- ticker delay self
+  listener 0 ref
+  liftIO $ putMVar result True
   where listener :: Int -> TimerRef -> Process ()
         listener n tRef | n > 10    = cancelTimer tRef
                         | otherwise = waitOne >> listener (n + 1) tRef  
+        -- get a single tick, blocking indefinitely
         waitOne :: Process ()
         waitOne = do
             Tick <- expect
             return ()
+
+testTimerReset :: TestResult Int -> Process ()
+testTimerReset result = do
+  let delay        = seconds 5
+  
+  parent <- getSelfPid
+  counter <- liftIO $ newEmptyMVar
+  
+  listenerPid <- spawnLocal $ do
+      link parent
+      stash counter 0
+      -- we continually listen for 'ticks' and increment counter for each
+      forever $ do
+        Tick <- expect
+        n <- liftIO $ withMVar counter (\n -> (return (n + 1)))
+        say $ "received " ++ (show n)   
+
+  -- this ticker will 'fire' every 10 seconds
+  ref <- ticker delay listenerPid
+
+  sleep $ seconds 2  
+  resetTimer ref
+  
+  -- at this point, the timer should be back to a c. 10 second count down
+  -- so... in 5 seconds no ticks ought to make it to the listener
+  sleep $ seconds 3
+  
+  -- kill off the timer and the listener quickly now
+  cancelTimer ref
+  kill listenerPid "stop!"
+    
+  -- how many 'ticks' did the listener observer? (hopefully none!)
+  count <- liftIO $ takeMVar counter
+  liftIO $ putMVar result count                                             
+
 --------------------------------------------------------------------------------
 -- Plumbing                                                                   --
 --------------------------------------------------------------------------------
@@ -140,6 +176,11 @@ tests localNode = [
                                      localNode
                                      True
                                      testPeriodicSend)
+      , testCase "testTimerReset"   (delayedAssertion
+                                     "expected no Ticks to have been sent before resetting"
+                                     localNode
+                                     0
+                                     testTimerReset)
       ]
   ]
 
