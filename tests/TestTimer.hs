@@ -43,7 +43,7 @@ testSendAfter result =  do
   let delay = seconds 1
   pid <- getSelfPid
   _ <- sendAfter delay pid Ping
-  hdInbox <- receiveTimeout (intervalToMs delay * 2) [
+  hdInbox <- receiveTimeout (intervalToMs delay * 4) [
                                  match (\m@(Ping) -> return m) ]
   case hdInbox of
       Just Ping -> stash result True
@@ -58,7 +58,7 @@ testRunAfter result = do
     _ <- runAfter delay $ send parentPid Ping
     return ()
 
-  msg <- expectTimeout (intervalToMs delay * 2)
+  msg <- expectTimeout (intervalToMs delay * 4)
   case msg of
       Just Ping -> stash result True
       Nothing   -> stash result False
@@ -66,18 +66,17 @@ testRunAfter result = do
 
 testCancelTimer :: TestResult Bool -> Process ()
 testCancelTimer result = do
-  let delay = milliseconds 200
+  let delay = milliseconds 50
+  pid <- periodically delay noop
+  ref <- monitor pid    
   
-  _ <- spawnLocal $ do
-    pid <- periodically delay noop
+  sleep $ seconds 1      
+  cancelTimer pid
       
-    sleep $ seconds 1
-      
-    ref <- monitor pid
-    cancelTimer pid
-      
-    ProcessMonitorNotification ref' pid' DiedNormal <- expect
-    stash result $ ref == ref' && pid == pid'
+  _ <- receiveWait [
+        match (\(ProcessMonitorNotification ref' pid' _) ->
+                stash result $ ref == ref' && pid == pid') ]
+        
   return ()
 
 testPeriodicSend :: TestResult Bool -> Process ()
@@ -98,19 +97,15 @@ testPeriodicSend result = do
 
 testTimerReset :: TestResult Int -> Process ()
 testTimerReset result = do
-  let delay        = seconds 5
-  
-  parent <- getSelfPid
+  let delay = seconds 10  
   counter <- liftIO $ newEmptyMVar
   
   listenerPid <- spawnLocal $ do
-      link parent
       stash counter 0
       -- we continually listen for 'ticks' and increment counter for each
       forever $ do
         Tick <- expect
-        n <- liftIO $ withMVar counter (\n -> (return (n + 1)))
-        say $ "received " ++ (show n)   
+        liftIO $ withMVar counter (\n -> (return (n + 1)))
 
   -- this ticker will 'fire' every 10 seconds
   ref <- ticker delay listenerPid
@@ -118,11 +113,9 @@ testTimerReset result = do
   sleep $ seconds 2  
   resetTimer ref
   
-  -- at this point, the timer should be back to a c. 10 second count down
-  -- so... in 5 seconds no ticks ought to make it to the listener
-  sleep $ seconds 3
-  
-  -- kill off the timer and the listener quickly now
+  -- at this point, the timer should be back to roughly a 5 second count down
+  -- so our few remaining cycles no ticks ought to make it to the listener
+  -- therefore we kill off the timer and the listener now and take the count
   cancelTimer ref
   kill listenerPid "stop!"
     
@@ -138,10 +131,10 @@ testTimerFlush result = do
   _    <- monitor ref
   
   -- sleep so we *should* have a message in our 'mailbox'
-  sleep delay
+  sleep $ milliseconds 1500
   
-  -- flush it out
-  flushTimer ref Tick
+  -- flush it out if it's there
+  flushTimer ref Tick (seconds 3)
   
   m <- expectTimeout 10
   case m of
@@ -165,14 +158,14 @@ assertComplete msg mv a = do
     assertBool msg (a == b)
 
 noop :: Process ()
-noop = say "tick\n"
+noop = return ()
 
 stash :: TestResult a -> a -> Process ()
 stash mvar x = liftIO $ putMVar mvar x
 
 tests :: LocalNode  -> [Test]
 tests localNode = [
-    testGroup "Timer Send" [
+    testGroup "Timer Tests" [
         testCase "testSendAfter"    (delayedAssertion
                                      "expected Ping within 1 second"
                                      localNode True testSendAfter)
@@ -190,7 +183,7 @@ tests localNode = [
       , testCase "testTimerReset"   (delayedAssertion
                                      "expected no Ticks to have been sent before resetting"
                                      localNode 0 testTimerReset)
-      , testCase "testTimerReset"   (delayedAssertion
+      , testCase "testTimerFlush"   (delayedAssertion
                                      "expected all Ticks to have been flushed"
                                      localNode True testTimerFlush)
       ]

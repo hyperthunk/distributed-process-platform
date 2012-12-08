@@ -31,6 +31,7 @@ import Data.Binary
 import Data.DeriveTH
 import Data.Typeable                               (Typeable)
 import Prelude                                     hiding (init)
+import Control.Concurrent (threadDelay)
 
 -- | an opaque reference to a timer
 type TimerRef = ProcessId
@@ -92,7 +93,8 @@ timeToMs Hours   hrs  = ((hrs * 60) * 60) * 1000
 sleep :: TimeInterval -> Process ()
 sleep t = do
   let ms = intervalToMs t
-  Nothing <- receiveTimeout ms [match (\SleepingPill -> return ())]
+  _ <- receiveTimeout ms [matchIf (\SleepingPill -> True)
+                                  (\_ -> return ())]
   return ()
 
 -- | starts a timer which sends the supplied message to the destination process
@@ -129,11 +131,11 @@ cancelTimer = (flip send) Cancel
 -- | cancels a running timer and flushes any viable timer messages from the
 -- process' message queue. This function should only be called by the process
 -- expecting to receive the timer's messages!
-flushTimer :: (Serializable a, Eq a) => TimerRef -> a -> Process () 
-flushTimer ref ignore = do
+flushTimer :: (Serializable a, Eq a) => TimerRef -> a -> TimeInterval -> Process () 
+flushTimer ref ignore t = do
     cancelTimer ref
     -- TODO: monitor the timer ref (pid) and ensure it's gone before finishing
-    _ <- receiveTimeout 1 [
+    _ <- receiveTimeout (intervalToMs t) [
                 matchIf (\x -> x == ignore)
                         (\_ -> return ()) ]
     return ()
@@ -150,7 +152,7 @@ ticker t pid = startTimer t pid Tick
 runTimer :: TimeInterval -> Process () -> Bool -> Process ()
 runTimer t proc cancelOnReset = do
     cancel <- expectTimeout (intervalToMs t)
-    say $ "cancel = " ++ (show cancel) ++ "\n"
+    -- say $ "cancel = " ++ (show cancel) ++ "\n"
     case cancel of
         Nothing     -> runProc cancelOnReset
         Just Cancel -> return ()
@@ -162,5 +164,5 @@ runTimer t proc cancelOnReset = do
 -- create a 'sender' action for dispatching `msg' to `pid'
 mkSender :: (Serializable a) => ProcessId -> a -> Process ()
 mkSender pid msg = do
-  say "sending\n"
+  -- say "sending\n"
   send pid msg
