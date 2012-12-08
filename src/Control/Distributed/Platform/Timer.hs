@@ -31,7 +31,6 @@ import Data.Binary
 import Data.DeriveTH
 import Data.Typeable                               (Typeable)
 import Prelude                                     hiding (init)
-import Control.Concurrent (threadDelay)
 
 -- | an opaque reference to a timer
 type TimerRef = ProcessId
@@ -41,6 +40,7 @@ data TimerConfig = Reset | Cancel
     deriving (Typeable, Show)
 $(derive makeBinary ''TimerConfig)
 
+-- | represents a 'tick' event that timers can generate
 data Tick = Tick
     deriving (Typeable, Eq)
 $(derive makeBinary ''Tick)
